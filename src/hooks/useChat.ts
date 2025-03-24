@@ -82,16 +82,14 @@ export const useChat = (selectedModel: string, searchEnabled: boolean) => {
       }
 
       // Bước 2: Chỉ gọi GPT sau khi có kết quả tìm kiếm (nếu searchEnabled)
-      const messages = [
-        { role: 'user' as const, content: userInput }
+      const messages: Message[] = [
+        { role: 'user', content: userInput }
       ];
-
-      // Thêm context từ Tavily nếu có
+      
       if (searchEnabled && searchContext) {
         messages.push({
-          role: 'system' as const,
-          content: `Use this research data to provide a comprehensive response:
-${searchContext}`
+          role: 'system',
+          content: `Use this research data to provide a comprehensive response:\n${searchContext}`
         });
       }
 
