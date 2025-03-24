@@ -1,4 +1,11 @@
 {
-    "regions": ["sin1"]
+    "functions": {
+      "app/api/**/route.js": {
+        "regions": ["sin1"]
+      },
+      "app/api/**/route.ts": {
+        "regions": ["sin1"]
+      }
+    }
   }
   
