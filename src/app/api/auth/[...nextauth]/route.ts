@@ -1,5 +1,21 @@
-// Tạm thời để tránh build fail - sau này bạn sẽ viết logic login ở đây
-export async function GET() {
-    return new Response("Not implemented", { status: 501 });
-  }
-  
+import NextAuth from 'next-auth';
+import GoogleProvider from 'next-auth/providers/google';
+import { NextAuthOptions } from 'next-auth';
+
+export const authOptions: NextAuthOptions = {
+  providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+  ],
+  pages: {
+    signIn: '/auth/signin',
+    error: '/auth/error',
+  },
+  secret: process.env.NEXTAUTH_SECRET,
+  debug: process.env.NODE_ENV === 'development',
+};
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
