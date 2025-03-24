@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  name           String?
+  image          String?
+  sessions       ChatSession[]
+  messages       Message[]
+  createdAt      DateTime       @default(now())
+  plan           Plan           @default(FREE)
+  usageCount     Int            @default(0) // token hoặc số lần chat
+  isSubscribed   Boolean        @default(false)
+}
+
+model ChatSession {
+  id        String     @id @default(cuid())
+  user      User       @relation(fields: [userId], references: [id])
+  userId    String
+  messages  Message[]
+  title     String?    // Tuỳ chọn: đặt tên session (nếu có tính năng lưu tiêu đề)
+  createdAt DateTime   @default(now())
+}
+
+model Message {
+  id          String       @id @default(cuid())
+  session     ChatSession  @relation(fields: [sessionId], references: [id])
+  sessionId   String
+  user        User         @relation(fields: [userId], references: [id])
+  userId      String
+  role        Role         // user | assistant | system
+  content     String
+  createdAt   DateTime     @default(now())
+  fileUrl     String?      // nếu tin nhắn liên quan đến file upload
+}
+
+enum Role {
+  user
+  assistant
+  system
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
