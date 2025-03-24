@@ -1,11 +1,12 @@
 {
-    "regions": ["sin1"],
+    "regions": [
+        "sin1"
+    ],
     "functions": {
-      "api/**.ts": {
-        "memory": 512,
-        "maxDuration": 10,
-        "runtime": "nodejs"
-      }
+        "api/**.ts": {
+            "memory": 512,
+            "maxDuration": 10,
+            "runtime": "nodejs18.x"
+        }
     }
-  }
-  
+}
