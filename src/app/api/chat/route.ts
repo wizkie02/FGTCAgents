@@ -46,45 +46,39 @@ export async function POST(req: Request) {
       throw new AppError('User not authenticated', 401);
     }
 
-    // Lấy dữ liệu từ body
+    // Lấy dữ liệu từ request body
     const { messages, model = 'gpt-3.5-turbo', searchEnabled = false, sessionId } = await req.json();
-
     const email = session.user.email;
     const name = session.user.name || '';
     const image = session.user.image || '';
 
-    // Upsert user
+    // Upsert user vào DB
     const user = await prisma.user.upsert({
       where: { email },
       update: { name, image, lastSeenAt: new Date() },
       create: { email, name, image, lastSeenAt: new Date(), plan: 'FREE' },
     });
 
-    // Nếu có sessionId, load phiên chat cũ; nếu không, tạo phiên mới
+    // Quản lý Chat Session:
+    // Nếu không có sessionId, tạo phiên chat mới (summary khởi tạo là rỗng)
+    // Nếu có sessionId, load phiên chat cũ; nếu không tìm thấy thì tạo mới
     let chatSession;
     if (!sessionId) {
       chatSession = await prisma.chatSession.create({
         data: {
           userId: user.id,
           title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
-          summary: messages.map((m: any) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          summary: [],
         },
       });
     } else {
       chatSession = await prisma.chatSession.findUnique({ where: { id: sessionId } });
       if (!chatSession) {
-        // Nếu sessionId được gửi nhưng không tìm thấy, tạo mới
         chatSession = await prisma.chatSession.create({
           data: {
             userId: user.id,
             title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
-            summary: messages.map((m: any) => ({
-              role: m.role,
-              content: m.content,
-            })),
+            summary: [],
           },
         });
       }
@@ -109,6 +103,7 @@ export async function POST(req: Request) {
       data: { lastChatAt: new Date() },
     });
 
+    // Kiểm tra model hợp lệ
     const validModels = [
       'deepseek-chat', 'deepseek-reasoner', 'deepseek-coder',
       'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo',
@@ -119,6 +114,7 @@ export async function POST(req: Request) {
       throw new AppError('Invalid model specified', 400);
     }
 
+    // Nếu searchEnabled, xử lý các URL tham chiếu
     let urls: { [key: string]: string } = {};
     if (searchEnabled) {
       const reasoningInput = messages[messages.length - 1].content;
@@ -128,6 +124,7 @@ export async function POST(req: Request) {
       }
     }
 
+    // Xác định API URL, API KEY và requestBody dựa trên model
     let API_URL: string;
     let API_KEY: string;
     let requestBody: any;
@@ -156,6 +153,7 @@ export async function POST(req: Request) {
       };
     }
 
+    // Gửi request tới API LLM
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
@@ -214,13 +212,13 @@ export async function POST(req: Request) {
         if (!botAnswer) {
           console.warn('Bot answer is empty. Full accumulated text:', accumulated);
         }
-        // Sau khi stream hoàn tất, cập nhật DB với botAnswer
+        // Sau khi stream kết thúc, cập nhật DB với botAnswer và nối thêm vào summary của phiên chat cũ
         (async () => {
           const userMsg = userMessages[userMessages.length - 1];
           const responseTime = Date.now() - new Date(userMsg?.createdAt || Date.now()).getTime();
           const latestMessage = await prisma.message.findFirst({
             where: {
-              sessionId: chatSession!.id,
+              sessionId: chatSession.id,
               userId: user.id,
               role: 'user',
             },
@@ -233,20 +231,13 @@ export async function POST(req: Request) {
             });
           }
           const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
-          let newSummary: Array<{ role: string; content: string }> = [...previousSummary];
-          // Append summary: nếu tin nhắn user cuối cùng đã tồn tại thì chỉ thêm tin nhắn bot, nếu không thì thêm cả 2.
-          if (
-            newSummary.length > 0 &&
-            newSummary[newSummary.length - 1].role === 'user' &&
-            newSummary[newSummary.length - 1].content === userMsg?.content
-          ) {
-            newSummary.push({ role: 'assistant', content: botAnswer });
-          } else {
-            newSummary.push({ role: 'user', content: userMsg?.content || '' });
-            newSummary.push({ role: 'assistant', content: botAnswer });
-          }
+          const newSummary = [
+            ...previousSummary,
+            { role: 'user', content: userMsg?.content || '' },
+            { role: 'assistant', content: botAnswer }
+          ];
           await prisma.chatSession.update({
-            where: { id: chatSession!.id },
+            where: { id: chatSession.id },
             data: { summary: newSummary, answer: botAnswer },
           });
         })();
@@ -254,13 +245,14 @@ export async function POST(req: Request) {
     });
     const transformedStream = response.body.pipeThrough(transformer);
 
-    // Trả về stream response cho client, kèm header "x-session-id" để client update URL thành /c/{sessionId}
+    // --- Trả về stream response cho client, kèm header "x-session-id" ---
+    // Client sẽ dùng header này để điều hướng URL thành https://fgtc-agents.vercel.app/c/{chatSession.id}
     return new Response(transformedStream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'x-session-id': chatSession!.id,
+        'x-session-id': chatSession.id,
       },
     });
   } catch (error) {
