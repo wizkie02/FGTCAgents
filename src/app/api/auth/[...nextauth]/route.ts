@@ -1,5 +1,6 @@
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
+import { prisma } from '@/lib/prisma'; // ✅ Đường dẫn có thể điều chỉnh tùy dự án
 
 const handler = NextAuth({
   providers: [
@@ -24,13 +25,23 @@ const handler = NextAuth({
     strategy: 'jwt',
   },
   callbacks: {
-    async signIn({ user, account, profile, email, credentials }) {
+    async signIn({ user }) {
+      if (user?.email) {
+        await prisma.user.upsert({
+          where: { email: user.email },
+          update: { name: user.name, image: user.image },
+          create: {
+            email: user.email,
+            name: user.name,
+            image: user.image,
+            plan: 'FREE', // hoặc giá trị mặc định nếu bạn muốn
+          },
+        });
+      }
       return true;
     },
     async redirect({ url, baseUrl }) {
-      if (url.startsWith("/")) return `${baseUrl}${url}`
-      else if (new URL(url).origin === baseUrl) return url
-      return baseUrl
+      return url.startsWith("/") ? `${baseUrl}${url}` : url;
     }
   }
 });
