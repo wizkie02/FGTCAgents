@@ -11,6 +11,7 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const GPT_API_URL = 'https://api.openai.com/v1/chat/completions';
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
+// Bỏ runtime edge để tránh lỗi với next-auth
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
@@ -63,7 +64,9 @@ export async function POST(req: Request) {
     });
 
     const data = await response.json();
-    const botMessage = model.startsWith('claude') ? data.content[0]?.text || '' : data.choices?.[0]?.message?.content || '';
+    const botMessage = model.startsWith('claude')
+      ? data.content?.[0]?.text || ''
+      : data.choices?.[0]?.message?.content || '';
 
     let sessionRecord;
     if (sessionId) {
@@ -103,9 +106,17 @@ export async function POST(req: Request) {
       data: { lastChatAt: new Date() },
     });
 
-    return NextResponse.json({ answer: botMessage, sessionId: sessionRecord.id });
+    return new Response(
+      JSON.stringify({ answer: botMessage, sessionId: sessionRecord.id }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
   } catch (error) {
-    console.error(error);
+    console.error('Chat Error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
