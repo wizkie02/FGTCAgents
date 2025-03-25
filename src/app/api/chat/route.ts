@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { AppError, createErrorResponse } from '@/lib/error'; // <-- thêm dòng này
+import { AppError, createErrorResponse } from '@/lib/error';
 
 const prisma = new PrismaClient();
 
@@ -40,27 +40,44 @@ async function streamToString(stream: ReadableStream<Uint8Array>): Promise<strin
 
 export async function POST(req: Request) {
   try {
+    // Xác thực người dùng
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       throw new AppError('User not authenticated', 401);
     }
 
+    // Lấy dữ liệu từ body
     const { messages, model = 'gpt-3.5-turbo', searchEnabled = false, sessionId } = await req.json();
 
     const email = session.user.email;
     const name = session.user.name || '';
     const image = session.user.image || '';
 
+    // Upsert user
     const user = await prisma.user.upsert({
       where: { email },
       update: { name, image, lastSeenAt: new Date() },
       create: { email, name, image, lastSeenAt: new Date(), plan: 'FREE' },
     });
 
-    // Nếu không có sessionId, tạo chat session mới; nếu có, load phiên cũ để tiếp tục
-    const isNewSession = !sessionId;
-    const chatSession = isNewSession
-      ? await prisma.chatSession.create({
+    // Nếu có sessionId, load phiên chat cũ; nếu không, tạo phiên mới
+    let chatSession;
+    if (!sessionId) {
+      chatSession = await prisma.chatSession.create({
+        data: {
+          userId: user.id,
+          title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
+          summary: messages.map((m: any) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        },
+      });
+    } else {
+      chatSession = await prisma.chatSession.findUnique({ where: { id: sessionId } });
+      if (!chatSession) {
+        // Nếu sessionId được gửi nhưng không tìm thấy, tạo mới
+        chatSession = await prisma.chatSession.create({
           data: {
             userId: user.id,
             title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
@@ -69,15 +86,16 @@ export async function POST(req: Request) {
               content: m.content,
             })),
           },
-        })
-      : await prisma.chatSession.findUnique({ where: { id: sessionId } });
+        });
+      }
+    }
 
-    // Lưu tin nhắn của người dùng
+    // Lưu tin nhắn của người dùng vào DB
     const userMessages = messages.filter((m: any) => m.role === 'user');
     for (const msg of userMessages) {
       await prisma.message.create({
         data: {
-          sessionId: chatSession!.id,
+          sessionId: chatSession.id,
           userId: user.id,
           role: 'user',
           content: msg.content,
@@ -85,6 +103,7 @@ export async function POST(req: Request) {
       });
     }
 
+    // Cập nhật thời gian chat mới nhất cho user
     await prisma.user.update({
       where: { id: user.id },
       data: { lastChatAt: new Date() },
@@ -112,7 +131,6 @@ export async function POST(req: Request) {
     let API_URL: string;
     let API_KEY: string;
     let requestBody: any;
-
     if (model.startsWith('deepseek')) {
       API_URL = DEEPSEEK_API_URL;
       API_KEY = DEEPSEEK_API_KEY as string;
@@ -161,9 +179,8 @@ export async function POST(req: Request) {
       throw new AppError(`API error: ${errorMsg}`, response.status);
     }
 
-    // --- Xử lý stream response theo dạng TransformStream ---
+    // --- Xử lý stream response sử dụng TransformStream ---
     if (!response.body) throw new AppError('No response body', 500);
-
     let accumulated = "";
     const transformer = new TransformStream({
       transform(chunk, controller) {
@@ -172,7 +189,6 @@ export async function POST(req: Request) {
         controller.enqueue(chunk);
       },
       flush(controller) {
-        // Khi stream kết thúc, parse toàn bộ accumulated để lấy botAnswer
         let botAnswer = "";
         try {
           const chunks = accumulated
@@ -218,6 +234,7 @@ export async function POST(req: Request) {
           }
           const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
           let newSummary: Array<{ role: string; content: string }> = [...previousSummary];
+          // Append summary: nếu tin nhắn user cuối cùng đã tồn tại thì chỉ thêm tin nhắn bot, nếu không thì thêm cả 2.
           if (
             newSummary.length > 0 &&
             newSummary[newSummary.length - 1].role === 'user' &&
@@ -237,12 +254,13 @@ export async function POST(req: Request) {
     });
     const transformedStream = response.body.pipeThrough(transformer);
 
-    // --- Trả về stream response cho client ---
+    // Trả về stream response cho client, kèm header "x-session-id" để client update URL thành /c/{sessionId}
     return new Response(transformedStream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
+        'x-session-id': chatSession!.id,
       },
     });
   } catch (error) {
