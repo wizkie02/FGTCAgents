@@ -43,17 +43,24 @@ export async function POST(req: Request) {
       update: { name, image, lastSeenAt: new Date() },
       create: { email, name, image, lastSeenAt: new Date(), plan: 'FREE' },
     });
-
     const isNewSession = !sessionId;
-    const chatSession = isNewSession
-      ? await prisma.chatSession.create({
+    let chatSessionId: string;
+
+    if (isNewSession) {
+      const createdSession = await prisma.chatSession.create({
         data: {
           userId: user.id,
           title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
-          summary: [], // tạo trống, cập nhật sau
+          summary: messages.map((m: any) => ({
+            role: m.role,
+            content: m.content,
+          })),
         },
-      })
-      : await prisma.chatSession.update({
+      });
+      chatSessionId = createdSession.id;
+    } else {
+      chatSessionId = sessionId;
+      await prisma.chatSession.update({
         where: { id: sessionId },
         data: {
           summary: {
@@ -64,6 +71,13 @@ export async function POST(req: Request) {
           },
         },
       });
+    }
+
+    const chatSession = await prisma.chatSession.findUnique({
+      where: { id: chatSessionId },
+    });
+
+
 
 
     const userMessages = messages.filter((m: any) => m.role === 'user');
@@ -205,18 +219,46 @@ export async function POST(req: Request) {
     }
 
     // Cập nhật summary log
-    const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
-    const newSummaryItem = [
-      { role: 'user', content: userMsg?.content || '' },
-      { role: 'assistant', content: botAnswer },
-    ];
-    await prisma.chatSession.update({
-      where: { id: chatSession!.id },
-      data: {
-        summary: [...previousSummary, ...newSummaryItem],
-        answer: botAnswer,
-      },
-    });
+    if (userMsg) {
+      const latestMessage = await prisma.message.findFirst({
+        where: {
+          sessionId: chatSession!.id,
+          userId: user.id,
+          role: 'user',
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      const responseTime = Date.now() - new Date(latestMessage?.createdAt || Date.now()).getTime();
+
+      if (latestMessage) {
+        await prisma.message.update({
+          where: { id: latestMessage.id },
+          data: {
+            answer: botAnswer,
+            responseTime,
+          },
+        });
+      }
+
+      // Append to summary log
+      const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
+      const newSummaryItem = [
+        { role: 'user', content: userMsg?.content || '' },
+        { role: 'assistant', content: botAnswer },
+      ];
+
+      await prisma.chatSession.update({
+        where: { id: chatSession!.id },
+        data: {
+          summary: [...previousSummary, ...newSummaryItem],
+          answer: botAnswer,
+        },
+      });
+    }
+
 
 
     return new Response(response.body, {
