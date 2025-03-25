@@ -18,14 +18,10 @@ if (!CLAUDE_API_KEY) {
   throw new Error('CLAUDE_API_KEY is not set in environment variables');
 }
 
-// Set response timeout to 30 seconds
 export const maxDuration = 30;
-
-// Configure the runtime to use edge for better streaming support
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
-// Hàm xử lý citation: thay thế "Source X" bằng "[X]"
 function processCitation(content: string, urls: { [key: string]: string }) {
   return content.replace(/Source (\d+)/g, (_, num) => `[${num}]`);
 }
@@ -45,7 +41,6 @@ export async function POST(req: Request) {
       throw new Error('Invalid model specified');
     }
 
-    // Chỉ xử lý citations khi searchEnabled = true
     let urls: { [key: string]: string } = {};
     if (searchEnabled) {
       const reasoningInput = messages[messages.length - 1].content;
@@ -55,7 +50,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Determine which API to use
     let API_URL: string;
     let API_KEY: string;
     let requestBody: any;
@@ -106,7 +100,6 @@ export async function POST(req: Request) {
       body: JSON.stringify(requestBody),
     });
 
-    // Nếu API trả về lỗi, in ra chi tiết lỗi từ API
     if (!response.ok) {
       const errorText = await response.text();
       let errorMsg: string;
@@ -120,7 +113,6 @@ export async function POST(req: Request) {
       throw new Error(`API error: ${errorMsg}`);
     }
 
-    // Trả về stream trực tiếp từ API
     return new Response(response.body, {
       headers: {
         'Content-Type': 'text/event-stream',
