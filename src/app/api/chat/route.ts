@@ -233,14 +233,15 @@ export async function POST(req: Request) {
     // --- Kết thúc xử lý stream và DB update ---
 
     // Trả về stream response cho client, giữ nguyên stream gốc
-    return new Response(streamForClient, {
+    return new Response(response.body, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
       },
     });
+
   } catch (error) {
-    return createErrorResponse(error);
+    return createErrorResponse(error); // <-- thay vì dùng NextResponse trực tiếp
   }
 }
