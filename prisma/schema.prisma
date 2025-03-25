@@ -14,34 +14,37 @@ model User {
   image          String?
   plan           Plan           @default(FREE)
   isSubscribed   Boolean        @default(false)
-  usageCount     Int            @default(0)       // Số lần chat / token sử dụng
-  lastSeenAt     DateTime?                       // ✅ Lần cuối người dùng truy cập web
-  lastChatAt     DateTime?                       // ✅ Lần cuối người dùng gửi tin nhắn
+  usageCount     Int            @default(0)
+  lastSeenAt     DateTime?                       // ⏱ Lần cuối user vào hệ thống
+  lastChatAt     DateTime?                       // ⏱ Lần cuối user gửi tin nhắn
   createdAt      DateTime       @default(now())
-  sessions       ChatSession[]                  // Các phiên chat
-  messages       Message[]                      // Toàn bộ tin nhắn
-  feedbacks      Feedback[]                     // Phản hồi của người dùng
+  sessions       ChatSession[]                  // 💬 Các session chat của user
+  messages       Message[]                      // 💬 Các message của user
+  feedbacks      Feedback[]                     // 📝 Feedback từ user
 }
 
 model ChatSession {
-  id        String     @id @default(cuid())
-  user      User       @relation(fields: [userId], references: [id])
-  userId    String
-  messages  Message[]
-  title     String?                       // Tiêu đề của phiên chat (tuỳ chọn)
-  createdAt DateTime     @default(now())
+  id          String     @id @default(cuid())
+  user        User       @relation(fields: [userId], references: [id])
+  userId      String
+  messages    Message[]
+  title       String?
+  summary     Json?       // 🧠 Tóm tắt các lượt hội thoại { user: "...", chatbot: "..." }
+  answer      String?     // 🧠 Câu trả lời gần nhất
+  createdAt   DateTime   @default(now())
 }
 
 model Message {
-  id          String       @id @default(cuid())
+  id          String     @id @default(cuid())
   session     ChatSession  @relation(fields: [sessionId], references: [id])
   sessionId   String
-  user        User         @relation(fields: [userId], references: [id])
+  user        User       @relation(fields: [userId], references: [id])
   userId      String
   role        Role
-  content     String
-  fileUrl     String?                        // Nếu có file đính kèm
-  createdAt   DateTime     @default(now())
+  content     String                      // ✍️ Nội dung tin nhắn người dùng
+  answer      String?                     // 🤖 Trả lời của chatbot (tự động thêm vào sau)
+  createdAt   DateTime   @default(now())
+  fileUrl     String?
 }
 
 model Feedback {
@@ -49,7 +52,7 @@ model Feedback {
   user      User       @relation(fields: [userId], references: [id])
   userId    String
   message   String
-  rating    Int?                            // Ví dụ: 1–5 sao
+  rating    Int?                             // ⭐ Số sao đánh giá (1-5)
   createdAt DateTime   @default(now())
 }
 

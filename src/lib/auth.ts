@@ -27,7 +27,26 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async signIn({ user }) {
-      return !!user.email;
+      if (user?.email) {
+        await prisma.user.upsert({
+          where: { email: user.email },
+          update: {
+            name: user.name,
+            image: user.image,
+            lastSeenAt: new Date(),
+            lastChatAt: new Date(),
+          },
+          create: {
+            email: user.email,
+            name: user.name,
+            image: user.image,
+            lastSeenAt: new Date(),
+            lastChatAt: new Date(),
+            plan: 'FREE',
+          },
+        });
+      }
+      return true;
     },
   },
   secret: process.env.NEXTAUTH_SECRET,
