@@ -6,8 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "vercel-build": "node vercel-build.js && next build"
   },
+  
   "dependencies": {
     "@ai-sdk/anthropic": "^0.0.48",
     "@ai-sdk/openai": "^0.0.54",
