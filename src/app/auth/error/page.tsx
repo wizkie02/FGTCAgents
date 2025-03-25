@@ -2,13 +2,7 @@
 
 import { useEffect } from 'react';
 
-interface ErrorPageProps {
-  error: Error;
-  reset: () => void;
-}
-
-export default function ErrorPage({ error, reset }: ErrorPageProps) {
-  // Log lỗi để dễ debug
+export default function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
   useEffect(() => {
     console.error('Error caught in ErrorPage:', error);
   }, [error]);
