@@ -1,11 +1,15 @@
-import { NextAuthOptions } from 'next-auth';
+// src/lib/auth.ts
+import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import GoogleProvider from 'next-auth/providers/google';
+import { prisma } from '@/lib/prisma';
+import { type NextAuthOptions } from 'next-auth';
 
 export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(prisma),
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+      clientId: process.env.GOOGLE_CLIENT_ID || '',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
       authorization: {
         params: {
           prompt: 'consent',
@@ -19,17 +23,33 @@ export const authOptions: NextAuthOptions = {
     signIn: '/auth/signin',
     error: '/auth/error',
   },
-  secret: process.env.NEXTAUTH_SECRET,
   session: {
     strategy: 'jwt',
   },
   callbacks: {
     async signIn({ user }) {
-      // chỉ validate, không dính prisma ở đây
-      return !!user.email;
+      if (user?.email) {
+        await prisma.user.upsert({
+          where: { email: user.email },
+          update: {
+            name: user.name,
+            image: user.image,
+            lastSeenAt: new Date(),
+          },
+          create: {
+            email: user.email,
+            name: user.name,
+            image: user.image,
+            lastSeenAt: new Date(),
+            plan: 'FREE',
+          },
+        });
+      }
+      return true;
     },
     async redirect({ baseUrl }) {
       return baseUrl;
     },
   },
+  secret: process.env.NEXTAUTH_SECRET,
 };
