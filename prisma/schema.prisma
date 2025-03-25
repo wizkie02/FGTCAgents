@@ -8,14 +8,14 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(cuid())
-  email         String        @unique
+  id            String     @id @default(cuid())
+  email         String     @unique
   name          String?
   image         String?
-  createdAt     DateTime      @default(now())
-  plan          Plan          @default(FREE)
-  usageCount    Int           @default(0)
-  isSubscribed  Boolean       @default(false)
+  createdAt     DateTime   @default(now())
+  plan          Plan       @default(FREE)
+  usageCount    Int        @default(0)
+  isSubscribed  Boolean    @default(false)
   emailVerified DateTime?
   lastChatAt    DateTime?
   lastSeenAt    DateTime?
@@ -66,22 +66,23 @@ model ChatSession {
   title     String?
   createdAt DateTime  @default(now())
   answer    String?
-  summary   Json?
+  summary   Json?     // full conversation log: [{role: 'user', content: '...'}, {role: 'assistant', content: '...'}]
   user      User      @relation(fields: [userId], references: [id])
   messages  Message[]
 }
 
 model Message {
-  id        String      @id @default(cuid())
-  sessionId String
-  userId    String
-  role      Role
-  content   String
-  createdAt DateTime    @default(now())
-  fileUrl   String?
-  answer    String?
-  session   ChatSession @relation(fields: [sessionId], references: [id])
-  user      User        @relation(fields: [userId], references: [id])
+  id             String      @id @default(cuid())
+  sessionId      String
+  userId         String
+  role           Role
+  content        String
+  answer         String?                     // AI's answer if role = user
+  responseTime Int?                        // Response time in ms if role = assistant
+  fileUrl        String?
+  createdAt      DateTime    @default(now())
+  session        ChatSession @relation(fields: [sessionId], references: [id])
+  user           User        @relation(fields: [userId], references: [id])
 }
 
 model Feedback {

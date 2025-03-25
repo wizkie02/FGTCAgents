@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';import { AppError, createErrorResponse } from '@/lib/error'; // <-- thêm dòng này
+import { authOptions } from '@/lib/auth'; import { AppError, createErrorResponse } from '@/lib/error'; // <-- thêm dòng này
 
 
 const prisma = new PrismaClient();
@@ -22,7 +22,7 @@ export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 
 function processCitation(content: string, urls: { [key: string]: string }) {
-  return content.replace(/Source (\d+)/g, (_, num) => `[${num}]`);
+  return content.replace(/Source (\d+)/g, (_, num) => '[${num}]');
 }
 
 export async function POST(req: Request) {
@@ -50,9 +50,24 @@ export async function POST(req: Request) {
         data: {
           userId: user.id,
           title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
+          summary: messages.map((m: any) => ({
+            role: m.role,
+            content: m.content,
+          })),
         },
       })
-      : await prisma.chatSession.findUnique({ where: { id: sessionId } });
+      : await prisma.chatSession.update({
+        where: { id: sessionId },
+        data: {
+          summary: {
+            set: messages.map((m: any) => ({
+              role: m.role,
+              content: m.content,
+            })),
+          },
+        },
+      });
+
 
     const userMessages = messages.filter((m: any) => m.role === 'user');
     for (const msg of userMessages) {
@@ -118,7 +133,7 @@ export async function POST(req: Request) {
         temperature: 0.7,
       };
     }
-
+    const responseStartTime = Date.now();
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
@@ -140,6 +155,51 @@ export async function POST(req: Request) {
       }
       console.error('API error:', errorMsg);
       throw new AppError(`API error: ${errorMsg}`, response.status);
+    }
+    // Đọc toàn bộ response nội dung (full answer từ LLM)
+    const botResponseText = await response.clone().text();
+    let botAnswer = '';
+
+    // Giải đáp từ từng model có thể nằm khác nhau, đơn giản lấy lại đoạn cuối cùng:
+    try {
+      const chunks = botResponseText
+        .split('data: ')
+        .filter(line => line && !line.includes('[DONE]'))
+        .map(line => JSON.parse(line));
+
+      const lastChunk = chunks[chunks.length - 1];
+      if (model.startsWith('claude')) {
+        botAnswer = lastChunk?.content?.[0]?.text || '';
+      } else if (model.startsWith('gpt') || model.startsWith('deepseek')) {
+        botAnswer = lastChunk?.choices?.[0]?.delta?.content || '';
+      }
+    } catch (err) {
+      console.warn('Could not parse response body for answer log.');
+    }
+
+    const responseEndTime = Date.now();
+    const responseTime = responseEndTime - responseStartTime;
+
+    // Cập nhật dòng Message mới nhất (giả định là câu cuối từ user trong session này)
+    const latestMessage = await prisma.message.findFirst({
+      where: {
+        sessionId: chatSession!.id,
+        userId: user.id,
+        role: 'user',
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+    
+    if (latestMessage) {
+      await prisma.message.update({
+        where: { id: latestMessage.id },
+        data: {
+          answer: botAnswer,
+          responseTime,
+        },
+      });
     }
 
     return new Response(response.body, {
