@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth'; import { AppError, createErrorResponse } from '@/lib/error'; // <-- thêm dòng này
-
+import { authOptions } from '@/lib/auth';
+import { AppError, createErrorResponse } from '@/lib/error'; // <-- thêm dòng này
 
 const prisma = new PrismaClient();
 
@@ -22,7 +22,7 @@ export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 
 function processCitation(content: string, urls: { [key: string]: string }) {
-  return content.replace(/Source (\d+)/g, (_, num) => '[${num}]');
+  return content.replace(/Source (\d+)/g, (_, num) => `[${num}]`);
 }
 
 export async function POST(req: Request) {
@@ -44,31 +44,32 @@ export async function POST(req: Request) {
       create: { email, name, image, lastSeenAt: new Date(), plan: 'FREE' },
     });
 
+    // Tạo phiên chat mới nếu chưa có sessionId, nếu có thì cập nhật/fetch phiên hiện có
     const isNewSession = !sessionId;
     const chatSession = isNewSession
       ? await prisma.chatSession.create({
-        data: {
-          userId: user.id,
-          title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
-          summary: messages.map((m: any) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        },
-      })
-      : await prisma.chatSession.update({
-        where: { id: sessionId },
-        data: {
-          summary: {
-            set: messages.map((m: any) => ({
+          data: {
+            userId: user.id,
+            title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
+            summary: messages.map((m: any) => ({
               role: m.role,
               content: m.content,
             })),
           },
-        },
-      });
+        })
+      : await prisma.chatSession.update({
+          where: { id: sessionId },
+          data: {
+            summary: {
+              set: messages.map((m: any) => ({
+                role: m.role,
+                content: m.content,
+              })),
+            },
+          },
+        });
 
-
+    // Lưu các tin nhắn của người dùng
     const userMessages = messages.filter((m: any) => m.role === 'user');
     for (const msg of userMessages) {
       await prisma.message.create({
@@ -133,7 +134,7 @@ export async function POST(req: Request) {
         temperature: 0.7,
       };
     }
-    const responseStartTime = Date.now();
+
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
@@ -156,60 +157,93 @@ export async function POST(req: Request) {
       console.error('API error:', errorMsg);
       throw new AppError(`API error: ${errorMsg}`, response.status);
     }
-    // Đọc toàn bộ response nội dung (full answer từ LLM)
-    const botResponseText = await response.clone().text();
-    let botAnswer = '';
 
-    // Giải đáp từ từng model có thể nằm khác nhau, đơn giản lấy lại đoạn cuối cùng:
-    try {
-      const chunks = botResponseText
-        .split('data: ')
-        .filter(line => line && !line.includes('[DONE]'))
-        .map(line => JSON.parse(line));
+    // --- Xử lý stream response theo dạng TransformStream ---
+    // Sử dụng TransformStream để "pipe" dữ liệu cho client đồng thời tích lũy toàn bộ nội dung stream
+    if (!response.body) throw new AppError('No response body', 500);
 
-      const lastChunk = chunks[chunks.length - 1];
-      if (model.startsWith('claude')) {
-        botAnswer = lastChunk?.content?.[0]?.text || '';
-      } else if (model.startsWith('gpt') || model.startsWith('deepseek')) {
-        botAnswer = lastChunk?.choices?.[0]?.delta?.content || '';
+    let accumulated = "";
+    const transformer = new TransformStream({
+      transform(chunk, controller) {
+        // Chuyển chunk thành text, tích lũy vào biến external "accumulated"
+        const text = new TextDecoder().decode(chunk, { stream: true });
+        accumulated += text;
+        controller.enqueue(chunk);
+      },
+      flush(controller) {
+        // Khi stream kết thúc, parse accumulated để lấy botAnswer
+        let botAnswer = "";
+        try {
+          const chunks = accumulated
+            .split('data: ')
+            .filter(line => line && !line.includes('[DONE]'))
+            .map(line => {
+              try {
+                return JSON.parse(line);
+              } catch (err) {
+                console.error('JSON parse error:', err, line);
+                return null;
+              }
+            })
+            .filter(chunk => chunk !== null);
+          if (model.startsWith('claude')) {
+            botAnswer = chunks.map(chunk => chunk?.content?.[0]?.text || '').join('');
+          } else if (model.startsWith('gpt') || model.startsWith('deepseek')) {
+            botAnswer = chunks.map(chunk => chunk?.choices?.[0]?.delta?.content || '').join('');
+          }
+        } catch (err) {
+          console.warn('Could not parse accumulated stream for answer log.', err);
+        }
+        if (!botAnswer) {
+          console.warn('Bot answer is empty. Full accumulated text:', accumulated);
+        }
+        // Sau khi stream hoàn tất (đã "in ra" xong cho client), cập nhật DB với botAnswer
+        (async () => {
+          const userMsg = userMessages[userMessages.length - 1];
+          const responseTime = Date.now() - new Date(userMsg?.createdAt || Date.now()).getTime();
+          const latestMessage = await prisma.message.findFirst({
+            where: {
+              sessionId: chatSession!.id,
+              userId: user.id,
+              role: 'user',
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (latestMessage) {
+            await prisma.message.update({
+              where: { id: latestMessage.id },
+              data: { answer: botAnswer, responseTime },
+            });
+          }
+          const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
+          let newSummary: Array<{ role: string; content: string }> = [...previousSummary];
+          if (
+            newSummary.length > 0 &&
+            newSummary[newSummary.length - 1].role === 'user' &&
+            newSummary[newSummary.length - 1].content === userMsg?.content
+          ) {
+            newSummary.push({ role: 'assistant', content: botAnswer });
+          } else {
+            newSummary.push({ role: 'user', content: userMsg?.content || '' });
+            newSummary.push({ role: 'assistant', content: botAnswer });
+          }
+          await prisma.chatSession.update({
+            where: { id: chatSession!.id },
+            data: { summary: newSummary, answer: botAnswer },
+          });
+        })();
       }
-    } catch (err) {
-      console.warn('Could not parse response body for answer log.');
-    }
-
-    const responseEndTime = Date.now();
-    const responseTime = responseEndTime - responseStartTime;
-
-    // Cập nhật dòng Message mới nhất (giả định là câu cuối từ user trong session này)
-    const latestMessage = await prisma.message.findFirst({
-      where: {
-        sessionId: chatSession!.id,
-        userId: user.id,
-        role: 'user',
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
     });
-    
-    if (latestMessage) {
-      await prisma.message.update({
-        where: { id: latestMessage.id },
-        data: {
-          answer: botAnswer,
-          responseTime,
-        },
-      });
-    }
+    const transformedStream = response.body.pipeThrough(transformer);
 
-    return new Response(response.body, {
+    // --- Trả về stream response cho client ---
+    return new Response(transformedStream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
       },
     });
-
   } catch (error) {
     return createErrorResponse(error); // <-- thay vì dùng NextResponse trực tiếp
   }
