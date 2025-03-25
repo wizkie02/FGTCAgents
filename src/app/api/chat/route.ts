@@ -25,6 +25,19 @@ function processCitation(content: string, urls: { [key: string]: string }) {
   return content.replace(/Source (\d+)/g, (_, num) => `[${num}]`);
 }
 
+// Helper: đọc stream thành string
+async function streamToString(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let result = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    result += decoder.decode(value, { stream: true });
+  }
+  return result;
+}
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -44,7 +57,7 @@ export async function POST(req: Request) {
       create: { email, name, image, lastSeenAt: new Date(), plan: 'FREE' },
     });
 
-    // Tạo phiên chat mới nếu chưa có sessionId, nếu có thì cập nhật/fetch phiên hiện có
+    // Nếu không có sessionId, tạo chat session mới; nếu có, load phiên cũ để tiếp tục
     const isNewSession = !sessionId;
     const chatSession = isNewSession
       ? await prisma.chatSession.create({
@@ -57,19 +70,9 @@ export async function POST(req: Request) {
             })),
           },
         })
-      : await prisma.chatSession.update({
-          where: { id: sessionId },
-          data: {
-            summary: {
-              set: messages.map((m: any) => ({
-                role: m.role,
-                content: m.content,
-              })),
-            },
-          },
-        });
+      : await prisma.chatSession.findUnique({ where: { id: sessionId } });
 
-    // Lưu các tin nhắn của người dùng
+    // Lưu tin nhắn của người dùng
     const userMessages = messages.filter((m: any) => m.role === 'user');
     for (const msg of userMessages) {
       await prisma.message.create({
@@ -159,19 +162,17 @@ export async function POST(req: Request) {
     }
 
     // --- Xử lý stream response theo dạng TransformStream ---
-    // Sử dụng TransformStream để "pipe" dữ liệu cho client đồng thời tích lũy toàn bộ nội dung stream
     if (!response.body) throw new AppError('No response body', 500);
 
     let accumulated = "";
     const transformer = new TransformStream({
       transform(chunk, controller) {
-        // Chuyển chunk thành text, tích lũy vào biến external "accumulated"
         const text = new TextDecoder().decode(chunk, { stream: true });
         accumulated += text;
         controller.enqueue(chunk);
       },
       flush(controller) {
-        // Khi stream kết thúc, parse accumulated để lấy botAnswer
+        // Khi stream kết thúc, parse toàn bộ accumulated để lấy botAnswer
         let botAnswer = "";
         try {
           const chunks = accumulated
@@ -197,7 +198,7 @@ export async function POST(req: Request) {
         if (!botAnswer) {
           console.warn('Bot answer is empty. Full accumulated text:', accumulated);
         }
-        // Sau khi stream hoàn tất (đã "in ra" xong cho client), cập nhật DB với botAnswer
+        // Sau khi stream hoàn tất, cập nhật DB với botAnswer
         (async () => {
           const userMsg = userMessages[userMessages.length - 1];
           const responseTime = Date.now() - new Date(userMsg?.createdAt || Date.now()).getTime();
@@ -245,6 +246,6 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
-    return createErrorResponse(error); // <-- thay vì dùng NextResponse trực tiếp
+    return createErrorResponse(error);
   }
 }
