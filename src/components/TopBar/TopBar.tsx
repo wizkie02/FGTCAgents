@@ -167,8 +167,7 @@ export const TopBar = ({ selectedModel, setSelectedModel, rerunLastQuery, lastQu
         ) : (
           <button
             onClick={() => signIn('google', {
-              callbackUrl: window.location.origin,
-              redirect: true,
+              callbackUrl: '/'
             })}
             className="flex items-center gap-2 text-sm bg-white text-gray-700 px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm font-medium"
           >

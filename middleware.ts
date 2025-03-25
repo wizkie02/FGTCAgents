@@ -1,27 +1,22 @@
-import { withAuth } from "next-auth/middleware"
-import { NextResponse } from "next/server"
+// middleware.ts
+
+import { withAuth } from 'next-auth/middleware';
+import { NextResponse } from 'next/server';
 
 export default withAuth(
   function middleware(req) {
-    return NextResponse.next()
+    return NextResponse.next();
   },
   {
     callbacks: {
-      authorized: ({ token }) => !!token
+      authorized: ({ token }) => !!token, // Cho phép truy cập nếu đã có JWT
     },
   }
-)
+);
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api/auth (auth API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    '/((?!api/auth|_next/static|_next/image|favicon.ico|public).*)',
-  ],
-}
+    matcher: [
+      '/((?!api/auth|_next/static|_next/image|favicon.ico|auth/signin(/.*)?|auth/error|public).*)',
+    ],
+  };
+  
