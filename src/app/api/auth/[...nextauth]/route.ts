@@ -1,19 +1,21 @@
-import NextAuth from 'next-auth';
-import GoogleProvider from 'next-auth/providers/google';
-import { prisma } from '@/lib/prisma'; // ✅ Đường dẫn có thể điều chỉnh tùy dự án
+// [...nextauth]/route.ts
 
-const handler = NextAuth({
+import NextAuth, { NextAuthOptions } from 'next-auth';
+import GoogleProvider from 'next-auth/providers/google';
+import { prisma } from '@/lib/prisma';
+
+export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      clientId: process.env.GOOGLE_CLIENT_ID ?? '',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
       authorization: {
         params: {
-          prompt: "consent",
-          access_type: "offline",
-          response_type: "code"
-        }
-      }
+          prompt: 'consent',
+          access_type: 'offline',
+          response_type: 'code',
+        },
+      },
     }),
   ],
   pages: {
@@ -35,16 +37,17 @@ const handler = NextAuth({
             name: user.name,
             image: user.image,
             lastSeenAt: new Date(),
-            plan: 'FREE', // hoặc giá trị mặc định nếu bạn muốn
+            plan: 'FREE',
           },
         });
       }
       return true;
     },
     async redirect({ url, baseUrl }) {
-      return url.startsWith("/") ? `${baseUrl}${url}` : url;
-    }
-  }
-});
+      return url.startsWith('/') ? `${baseUrl}${url}` : baseUrl;
+    },
+  },
+};
 
+const handler = NextAuth(authOptions);
 export { handler as GET, handler as POST };

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 
 const prisma = new PrismaClient();
 
@@ -25,26 +27,23 @@ function processCitation(content: string, urls: { [key: string]: string }) {
 
 export async function POST(req: Request) {
   try {
-    const {
-      messages,
-      model = 'gpt-3.5-turbo',
-      searchEnabled = false,
-      email,
-      name,
-      image,
-      sessionId,
-    } = await req.json();
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'User not authenticated' }, { status: 401 });
+    }
 
-    if (!email) throw new Error('Missing user email');
+    const { messages, model = 'gpt-3.5-turbo', searchEnabled = false, sessionId } = await req.json();
 
-    // Tạo hoặc cập nhật user + update lastSeenAt
+    const email = session.user.email;
+    const name = session.user.name || '';
+    const image = session.user.image || '';
+
     const user = await prisma.user.upsert({
       where: { email },
       update: { name, image, lastSeenAt: new Date() },
-      create: { email, name, image, lastSeenAt: new Date() },
+      create: { email, name, image, lastSeenAt: new Date(), plan: 'FREE' },
     });
 
-    // Tạo session mới nếu không có sessionId truyền vào
     const isNewSession = !sessionId;
     const chatSession = isNewSession
       ? await prisma.chatSession.create({
@@ -55,7 +54,6 @@ export async function POST(req: Request) {
         })
       : await prisma.chatSession.findUnique({ where: { id: sessionId } });
 
-    // Lưu tất cả message user vào DB
     const userMessages = messages.filter((m: any) => m.role === 'user');
     for (const msg of userMessages) {
       await prisma.message.create({
@@ -68,7 +66,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Cập nhật lastChatAt
     await prisma.user.update({
       where: { id: user.id },
       data: { lastChatAt: new Date() },
