@@ -18,7 +18,6 @@ if (!GPT_API_KEY) throw new Error('GPT_API_KEY is not set in environment variabl
 if (!CLAUDE_API_KEY) throw new Error('CLAUDE_API_KEY is not set in environment variables');
 
 export const maxDuration = 30;
-export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 function processCitation(content: string, urls: { [key: string]: string }) {
