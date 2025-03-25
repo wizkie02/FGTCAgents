@@ -178,29 +178,51 @@ export async function POST(req: Request) {
     }
 
     const responseEndTime = Date.now();
-    const responseTime = responseEndTime - responseStartTime;
 
     // Cập nhật dòng Message mới nhất (giả định là câu cuối từ user trong session này)
-    const latestMessage = await prisma.message.findFirst({
-      where: {
-        sessionId: chatSession!.id,
-        userId: user.id,
-        role: 'user',
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
     
-    if (latestMessage) {
-      await prisma.message.update({
-        where: { id: latestMessage.id },
-        data: {
-          answer: botAnswer,
-          responseTime,
-        },
-      });
-    }
+
+// Parse câu trả lời của bot từ API response
+const responseText = await response.clone().text(); // clone để dùng lại body
+
+// Ghi botAnswer và thời gian phản hồi vào bảng Message
+const userMsg = userMessages[userMessages.length - 1];
+const responseTime = new Date().getTime() - new Date(userMsg?.createdAt || Date.now()).getTime();
+const latestMessage = await prisma.message.findFirst({
+  where: {
+    sessionId: chatSession!.id,
+    userId: user.id,
+    role: 'user',
+  },
+  orderBy: {
+    createdAt: 'desc',
+  },
+});
+
+if (latestMessage) {
+  await prisma.message.update({
+    where: { id: latestMessage.id },
+    data: {
+      answer: botAnswer,
+      responseTime,
+    },
+  });
+}
+
+// Cập nhật summary log
+const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
+const newSummaryItem = [
+  { role: 'user', content: userMsg?.content || '' },
+  { role: 'assistant', content: botAnswer },
+];
+await prisma.chatSession.update({
+  where: { id: chatSession!.id },
+  data: {
+    summary: [...previousSummary, ...newSummaryItem],
+    answer: botAnswer,
+  },
+});
+
 
     return new Response(response.body, {
       headers: {
