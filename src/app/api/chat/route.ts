@@ -11,7 +11,6 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const GPT_API_URL = 'https://api.openai.com/v1/chat/completions';
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
-export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
