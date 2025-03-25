@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const GPT_API_KEY = process.env.OPENAI_API_KEY;
@@ -8,15 +11,9 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const GPT_API_URL = 'https://api.openai.com/v1/chat/completions';
 const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
-if (!DEEPSEEK_API_KEY) {
-  throw new Error('DEEPSEEK_API_KEY is not set in environment variables');
-}
-if (!GPT_API_KEY) {
-  throw new Error('GPT_API_KEY is not set in environment variables');
-}
-if (!CLAUDE_API_KEY) {
-  throw new Error('CLAUDE_API_KEY is not set in environment variables');
-}
+if (!DEEPSEEK_API_KEY) throw new Error('DEEPSEEK_API_KEY is not set in environment variables');
+if (!GPT_API_KEY) throw new Error('GPT_API_KEY is not set in environment variables');
+if (!CLAUDE_API_KEY) throw new Error('CLAUDE_API_KEY is not set in environment variables');
 
 export const maxDuration = 30;
 export const runtime = 'edge';
@@ -28,15 +25,61 @@ function processCitation(content: string, urls: { [key: string]: string }) {
 
 export async function POST(req: Request) {
   try {
-    const { messages, model = 'gpt-3.5-turbo', searchEnabled = false } = await req.json();
+    const {
+      messages,
+      model = 'gpt-3.5-turbo',
+      searchEnabled = false,
+      email,
+      name,
+      image,
+      sessionId,
+    } = await req.json();
+
+    if (!email) throw new Error('Missing user email');
+
+    // Tạo hoặc cập nhật user + update lastSeenAt
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: { name, image, lastSeenAt: new Date() },
+      create: { email, name, image, lastSeenAt: new Date() },
+    });
+
+    // Tạo session mới nếu không có sessionId truyền vào
+    const isNewSession = !sessionId;
+    const chatSession = isNewSession
+      ? await prisma.chatSession.create({
+          data: {
+            userId: user.id,
+            title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
+          },
+        })
+      : await prisma.chatSession.findUnique({ where: { id: sessionId } });
+
+    // Lưu tất cả message user vào DB
+    const userMessages = messages.filter((m: any) => m.role === 'user');
+    for (const msg of userMessages) {
+      await prisma.message.create({
+        data: {
+          sessionId: chatSession!.id,
+          userId: user.id,
+          role: 'user',
+          content: msg.content,
+        },
+      });
+    }
+
+    // Cập nhật lastChatAt
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastChatAt: new Date() },
+    });
 
     const validModels = [
       'deepseek-chat', 'deepseek-reasoner', 'deepseek-coder',
       'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo',
       'claude-3-opus', 'claude-3-sonnet', 'claude-2',
-      'gpt-4o-mini', 'gpt-4o'
+      'gpt-4o-mini', 'gpt-4o',
     ];
-
     if (!validModels.includes(model)) {
       throw new Error('Invalid model specified');
     }
@@ -57,22 +100,13 @@ export async function POST(req: Request) {
     if (model.startsWith('deepseek')) {
       API_URL = DEEPSEEK_API_URL;
       API_KEY = DEEPSEEK_API_KEY as string;
-      requestBody = {
-        model,
-        messages,
-        stream: true,
-        max_tokens: 4000,
-        temperature: 0.7,
-      };
+      requestBody = { model, messages, stream: true, max_tokens: 4000, temperature: 0.7 };
     } else if (model.startsWith('claude')) {
       API_URL = CLAUDE_API_URL;
       API_KEY = CLAUDE_API_KEY as string;
       requestBody = {
         model,
-        messages: messages.map((m: any) => ({
-          role: m.role === 'user' ? 'user' : 'assistant',
-          content: m.content
-        })),
+        messages: messages.map((m: any) => ({ role: m.role, content: m.content })),
         stream: true,
         max_tokens: 4000,
       };
@@ -93,9 +127,7 @@ export async function POST(req: Request) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${API_KEY}`,
-        ...(model.startsWith('claude') ? {
-          'anthropic-version': '2023-06-01'
-        } : {})
+        ...(model.startsWith('claude') ? { 'anthropic-version': '2023-06-01' } : {}),
       },
       body: JSON.stringify(requestBody),
     });

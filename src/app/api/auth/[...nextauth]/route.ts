@@ -29,11 +29,12 @@ const handler = NextAuth({
       if (user?.email) {
         await prisma.user.upsert({
           where: { email: user.email },
-          update: { name: user.name, image: user.image },
+          update: { name: user.name, image: user.image, lastSeenAt: new Date() },
           create: {
             email: user.email,
             name: user.name,
             image: user.image,
+            lastSeenAt: new Date(),
             plan: 'FREE', // hoặc giá trị mặc định nếu bạn muốn
           },
         });
