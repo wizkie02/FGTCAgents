@@ -50,10 +50,7 @@ export async function POST(req: Request) {
         data: {
           userId: user.id,
           title: messages?.[0]?.content?.slice(0, 50) || 'Untitled Chat',
-          summary: messages.map((m: any) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          summary: [], // tạo trống, cập nhật sau
         },
       })
       : await prisma.chatSession.update({
@@ -169,7 +166,9 @@ export async function POST(req: Request) {
 
       const lastChunk = chunks[chunks.length - 1];
       if (model.startsWith('claude')) {
-        botAnswer = lastChunk?.content?.[0]?.text || '';
+        botAnswer = chunks
+          .map((chunk) => chunk?.choices?.[0]?.delta?.content || '')
+          .join('');
       } else if (model.startsWith('gpt') || model.startsWith('deepseek')) {
         botAnswer = lastChunk?.choices?.[0]?.delta?.content || '';
       }
@@ -180,48 +179,44 @@ export async function POST(req: Request) {
     const responseEndTime = Date.now();
 
     // Cập nhật dòng Message mới nhất (giả định là câu cuối từ user trong session này)
-    
 
-// Parse câu trả lời của bot từ API response
-const responseText = await response.clone().text(); // clone để dùng lại body
+    // Ghi botAnswer và thời gian phản hồi vào bảng Message
+    const userMsg = userMessages[userMessages.length - 1];
+    const responseTime = new Date().getTime() - new Date(userMsg?.createdAt || Date.now()).getTime();
+    const latestMessage = await prisma.message.findFirst({
+      where: {
+        sessionId: chatSession!.id,
+        userId: user.id,
+        role: 'user',
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
 
-// Ghi botAnswer và thời gian phản hồi vào bảng Message
-const userMsg = userMessages[userMessages.length - 1];
-const responseTime = new Date().getTime() - new Date(userMsg?.createdAt || Date.now()).getTime();
-const latestMessage = await prisma.message.findFirst({
-  where: {
-    sessionId: chatSession!.id,
-    userId: user.id,
-    role: 'user',
-  },
-  orderBy: {
-    createdAt: 'desc',
-  },
-});
+    if (latestMessage) {
+      await prisma.message.update({
+        where: { id: latestMessage.id },
+        data: {
+          answer: botAnswer,
+          responseTime,
+        },
+      });
+    }
 
-if (latestMessage) {
-  await prisma.message.update({
-    where: { id: latestMessage.id },
-    data: {
-      answer: botAnswer,
-      responseTime,
-    },
-  });
-}
-
-// Cập nhật summary log
-const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
-const newSummaryItem = [
-  { role: 'user', content: userMsg?.content || '' },
-  { role: 'assistant', content: botAnswer },
-];
-await prisma.chatSession.update({
-  where: { id: chatSession!.id },
-  data: {
-    summary: [...previousSummary, ...newSummaryItem],
-    answer: botAnswer,
-  },
-});
+    // Cập nhật summary log
+    const previousSummary = (chatSession?.summary ?? []) as Array<{ role: string; content: string }>;
+    const newSummaryItem = [
+      { role: 'user', content: userMsg?.content || '' },
+      { role: 'assistant', content: botAnswer },
+    ];
+    await prisma.chatSession.update({
+      where: { id: chatSession!.id },
+      data: {
+        summary: [...previousSummary, ...newSummaryItem],
+        answer: botAnswer,
+      },
+    });
 
 
     return new Response(response.body, {
