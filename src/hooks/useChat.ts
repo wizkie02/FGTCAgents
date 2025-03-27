@@ -3,6 +3,44 @@
 import { useState, useRef } from 'react';
 import type { Message, ChatSection, SearchResult, TavilyResponse } from '../types/types';
 
+function parseModelResponse(data: any, provider: string) {
+  switch (provider) {
+    case 'anthropic':
+      return data.content[0].text;
+    case 'google':
+      return data.candidates[0].content.parts[0].text;
+    case 'deepseek':
+    case 'meta':
+    case 'mistral':
+    case 'openai':
+      return data.choices[0].message.content;
+    default:
+      throw new Error('Unsupported model provider');
+  }
+}
+
+function getProviderFromModel(model: string): string {
+  if (model.startsWith('gpt-') || model.startsWith('openai-') || model.startsWith('chatgpt-')) {
+    return 'openai';
+  }
+  if (model.startsWith('claude-')) {
+    return 'anthropic';
+  }
+  if (model.startsWith('gemini-')) {
+    return 'google';
+  }
+  if (model.startsWith('deepseek-')) {
+    return 'deepseek';
+  }
+  if (model.startsWith('llama-')) {
+    return 'meta';
+  }
+  if (model.startsWith('mistral-') || model.startsWith('mixtral-')) {
+    return 'mistral';
+  }
+  return 'openai'; // default to openai
+}
+
 export const useChat = (selectedModel: string, searchEnabled: boolean) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -166,6 +204,20 @@ export const useChat = (selectedModel: string, searchEnabled: boolean) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const processMessageStream = async (response: Response) => {
+    const data = await response.json();
+    const provider = getProviderFromModel(selectedModel);
+    const content = parseModelResponse(data, provider);
+    
+    // Update messages with the response
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content }
+    ]);
+    
+    setIsLoading(false);
   };
 
   return {
