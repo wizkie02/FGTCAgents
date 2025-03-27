@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { coy } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ChatSection as ChatSectionType } from '../../types/types';
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 
 interface ChatSectionProps {
   section: ChatSectionType;
@@ -80,7 +81,13 @@ export const ChatSection = ({ section, onCopy }: ChatSectionProps) => {
       {/* Bot response with collapsible reasoning */}
       <div className="mt-1 mb-4 flex items-start gap-3 justify-start">
         <div className="w-9 h-9 rounded-full bg-yellow-50/70 flex items-center justify-center flex-shrink-0 ml-0">
-          <img src="/image.svg" alt="Chatbot Logo" className="w-6 h-6 object-cover rounded-full" />
+          <Image 
+            src="/image.svg" 
+            alt="Chatbot Logo" 
+            width={24} 
+            height={24}
+            className="w-6 h-6 object-cover rounded-full" 
+          />
         </div>
         
         <div className="bg-gray-50/70 rounded-2xl rounded-tl-none px-4 py-3 max-w-full w-[calc(100%-3rem)]">
